@@ -3,18 +3,19 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from pathlib import Path
 
-# All paths are relative to this script.
 BASE_DIR = Path(__file__).parent
 RESULTS_DIR = BASE_DIR / "results"
 RESULTS_DIR.mkdir(exist_ok=True)
 
-# Read the original CSV and all repeated-run CSV files.
+# Load benchmark CSVs, including repeated runs.
 files = [BASE_DIR / "solver_comparison.csv"]
 files += sorted(BASE_DIR.glob("solver_comparison_run_*.csv"))
-files = [f for f in files if f.exists()]
+files = list(dict.fromkeys(f for f in files if f.exists()))
 
 if not files:
-    raise FileNotFoundError("No benchmark CSV files found.")
+    raise FileNotFoundError(
+        f"No benchmark CSV files found in {BASE_DIR}"
+    )
 
 frames = []
 
@@ -25,10 +26,12 @@ for file in files:
 
 data = pd.concat(frames, ignore_index=True)
 
-# Normalize column names and support older benchmark outputs.
+# Support older CSV column names.
 if "solve_time_seconds" not in data.columns:
     data["solve_time_seconds"] = (
-        data["solve_time"] if "solve_time" in data.columns else float("nan")
+        data["solve_time"]
+        if "solve_time" in data.columns
+        else float("nan")
     )
 
 if "build_time_seconds" not in data.columns:
@@ -37,28 +40,38 @@ if "build_time_seconds" not in data.columns:
 if "elapsed_seconds" not in data.columns:
     data["elapsed_seconds"] = float("nan")
 
-# Convert timing fields to numbers.
-time_columns = [
+for column in [
+    "n",
     "solve_time_seconds",
     "build_time_seconds",
     "elapsed_seconds",
-]
+]:
+    data[column] = pd.to_numeric(data[column], errors="coerce")
 
-for col in time_columns:
-    data[col] = pd.to_numeric(data[col], errors="coerce")
-
-data["n"] = pd.to_numeric(data["n"], errors="coerce")
 data["status"] = data["status"].astype(str).str.upper()
+data["solver"] = data["solver"].astype(str)
 
-# Keep successful runs for runtime statistics.
-successful = data[data["status"].isin(["SAT", "OPTIMAL", "FEASIBLE"])].copy()
+# Recognize successful results across the benchmark solvers.
+success_statuses = {"SAT", "OPTIMAL", "FEASIBLE"}
+timeout_statuses = {
+    "TIMEOUT",
+    "UNKNOWN_OR_TIMEOUT",
+    "TIMELIMIT",
+    "TIME_LIMIT",
+}
+
+data["is_success"] = data["status"].isin(success_statuses)
+data["is_timeout"] = data["status"].isin(timeout_statuses)
+data["is_error"] = data["status"].isin({"ERROR"})
+
+# Runtime statistics use successful runs only.
+successful = data[data["is_success"]].copy()
 
 if successful.empty:
     raise ValueError(
-        "No successful runs found. Check the status column in your CSV files."
+        "No successful runs found. Check the status values in your CSVs."
     )
 
-# Summarize successful runtimes by board size and solver.
 summary = (
     successful.groupby(["n", "solver"])
     .agg(
@@ -73,98 +86,127 @@ summary = (
     .reset_index()
 )
 
-# Count timeouts and errors for each solver and board size.
-failures = (
-    data.assign(
-        timed_out=data["status"].isin(["TIMEOUT", "UNKNOWN_OR_TIMEOUT"]),
-        error=data["status"].eq("ERROR"),
-    )
-    .groupby(["n", "solver"])
+counts = (
+    data.groupby(["n", "solver"])
     .agg(
         total_runs=("status", "size"),
-        timeout_count=("timed_out", "sum"),
-        error_count=("error", "sum"),
+        timeout_count=("is_timeout", "sum"),
+        error_count=("is_error", "sum"),
     )
     .reset_index()
 )
 
-summary = summary.merge(failures, on=["n", "solver"], how="left")
+summary = summary.merge(
+    counts, on=["n", "solver"], how="left"
+)
+
 summary["success_rate_percent"] = (
     summary["successful_runs"] / summary["total_runs"] * 100
 )
 
-summary.to_csv(RESULTS_DIR / "solver_summary.csv", index=False)
+summary.to_csv(
+    RESULTS_DIR / "solver_summary.csv",
+    index=False,
+)
 
-# Chart 1: Median solve time vs board size.
-plt.figure(figsize=(10, 6))
+# Consistent solver order, including SCIP if present.
+preferred_order = [
+    "Glucose3 Pairwise",
+    "Glucose3 Sequential",
+    "OR-Tools CP-SAT",
+    "SCIP MIP",
+]
+solvers = [s for s in preferred_order if s in data["solver"].unique()]
+solvers += [
+    s for s in data["solver"].unique() if s not in solvers
+]
 
-for solver, group in summary.groupby("solver"):
-    group = group.sort_values("n")
-    plt.plot(
-        group["n"],
-        group["median_solve_time"],
-        marker="o",
-        label=solver,
-    )
 
-plt.xlabel("Board size (N)")
-plt.ylabel("Median solve time (seconds)")
-plt.title("N-Queens Solver Runtime Comparison")
-plt.yscale("log")
-plt.grid(True, which="both", linestyle="--", alpha=0.5)
-plt.legend()
-plt.tight_layout()
-plt.savefig(RESULTS_DIR / "runtime_comparison.png", dpi=300)
-plt.close()
-
-# Chart 2: Median model build time vs board size.
-build_data = summary.dropna(subset=["median_build_time"])
-
-if not build_data.empty:
+def plot_metric(column, ylabel, title, filename, logarithmic=False):
     plt.figure(figsize=(10, 6))
+    plotted = False
 
-    for solver, group in build_data.groupby("solver"):
-        group = group.sort_values("n")
+    for solver_name in solvers:
+        group = summary[summary["solver"] == solver_name]
+        group = group.dropna(subset=[column]).sort_values("n")
+
+        if group.empty:
+            continue
+
+        # Log scale cannot display zero or negative values.
+        if logarithmic:
+            group = group[group[column] > 0]
+
+        if group.empty:
+            continue
+
         plt.plot(
             group["n"],
-            group["median_build_time"],
+            group[column],
             marker="o",
-            label=solver,
+            label=solver_name,
         )
+        plotted = True
 
     plt.xlabel("Board size (N)")
-    plt.ylabel("Median build time (seconds)")
-    plt.title("N-Queens Model Build Time Comparison")
-    plt.yscale("log")
+    plt.ylabel(ylabel)
+    plt.title(title)
+
+    if logarithmic:
+        plt.yscale("log")
+
     plt.grid(True, which="both", linestyle="--", alpha=0.5)
-    plt.legend()
+
+    if plotted:
+        plt.legend()
+
     plt.tight_layout()
-    plt.savefig(RESULTS_DIR / "build_time_comparison.png", dpi=300)
+    plt.savefig(RESULTS_DIR / filename, dpi=300)
     plt.close()
 
-# Chart 3: Timeout counts by solver and board size.
+
+# Chart 1: median solver runtime.
+plot_metric(
+    "median_solve_time",
+    "Median solve time (seconds)",
+    "N-Queens Solver Runtime Comparison",
+    "runtime_comparison.png",
+    logarithmic=True,
+)
+
+# Chart 2: median model/formula construction time.
+plot_metric(
+    "median_build_time",
+    "Median build time (seconds)",
+    "N-Queens Model Build Time Comparison",
+    "build_time_comparison.png",
+    logarithmic=True,
+)
+
+# Chart 3: number of timed-out runs.
 timeout_data = (
-    data.assign(
-        timed_out=data["status"].isin(["TIMEOUT", "UNKNOWN_OR_TIMEOUT"])
-    )
-    .groupby(["n", "solver"])["timed_out"]
+    data.groupby(["n", "solver"])["is_timeout"]
     .sum()
     .reset_index(name="timeout_count")
 )
 
 plt.figure(figsize=(10, 6))
 
-for solver, group in timeout_data.groupby("solver"):
-    group = group.sort_values("n")
-    plt.plot(
-        group["n"],
-        group["timeout_count"],
-        marker="o",
-        label=solver,
-    )
+for solver_name in solvers:
+    group = timeout_data[
+        timeout_data["solver"] == solver_name
+    ].sort_values("n")
+
+    if not group.empty:
+        plt.plot(
+            group["n"],
+            group["timeout_count"],
+            marker="o",
+            label=solver_name,
+        )
 
 plt.xlabel("Board size (N)")
-plt.ylabel("Number of timeouts")
+plt.ylabel("Number of timed-out runs")
 plt.title("Solver Timeouts by Board Size")
 plt.grid(True, linestyle="--", alpha=0.5)
 plt.legend()
@@ -172,8 +214,12 @@ plt.tight_layout()
 plt.savefig(RESULTS_DIR / "timeout_comparison.png", dpi=300)
 plt.close()
 
-print(f"Read {len(files)} CSV files:")
+print(f"Loaded {len(files)} CSV files:")
 for file in files:
     print(f"  {file.name}")
 
-print(f"\nSummary and charts saved in: {RESULTS_DIR}")
+print("\nSolvers found:")
+for solver_name in solvers:
+    print(f"  {solver_name}")
+
+print(f"\nSummary and charts saved to: {RESULTS_DIR}")
