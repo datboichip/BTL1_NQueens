@@ -4,6 +4,9 @@ from ortools.sat.python import cp_model
 
 
 def solve_n_queens(n, time_limit=40):
+    # Build the CP-SAT model.
+    build_start = time.perf_counter()
+
     model = cp_model.CpModel()
 
     # col[r] is the column occupied by the queen in row r.
@@ -22,12 +25,15 @@ def solve_n_queens(n, time_limit=40):
         col[r] - r for r in range(n)
     ])
 
+    build_time = time.perf_counter() - build_start
+
+    # Solve the model.
     solver = cp_model.CpSolver()
     solver.parameters.max_time_in_seconds = time_limit
 
-    start = time.perf_counter()
+    solve_start = time.perf_counter()
     status = solver.solve(model)
-    solve_time = time.perf_counter() - start
+    solve_time = time.perf_counter() - solve_start
 
     if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
         solution = [solver.value(col[r]) for r in range(n)]
@@ -37,12 +43,15 @@ def solve_n_queens(n, time_limit=40):
         result_status = "UNSAT"
     else:
         solution = None
-        result_status = "UNKNOWN_OR_TIMEOUT"
+        result_status = "TIMEOUT" if status == cp_model.UNKNOWN else "UNKNOWN"
 
     return {
         "n": n,
         "solver": "OR-Tools CP-SAT",
         "status": result_status,
+        "build_time_seconds": build_time,
+        "solve_time_seconds": solve_time,
+        # Keep this alias for compatibility with code using the old key.
         "solve_time": solve_time,
         "solution": solution,
     }
@@ -51,3 +60,4 @@ def solve_n_queens(n, time_limit=40):
 if __name__ == "__main__":
     for n in [8, 16, 32, 40, 48, 56, 64]:
         print(solve_n_queens(n))
+

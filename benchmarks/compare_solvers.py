@@ -13,7 +13,7 @@ from solvers.cp_sat_solver import solve_n_queens as solve_cp
 SIZES = range(4, 65, 4)
 TIME_LIMIT = 40
 
-RUN_ID = 1  # Change to 2, 3, 4, or 5 for each run
+RUN_ID = 5  # Change to 2, 3, 4, or 5 for each run
 OUTPUT = Path(__file__).with_name(f"solver_comparison_run_{RUN_ID}.csv")
 
 def run_sat(n, encoding):

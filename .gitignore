@@ -17,9 +17,10 @@ env/
 htmlcov/
 
 # Generated benchmark results (optional)
-*.csv
-benchmark_results.csv
+/benchmarks/results/
+*.png
 
 # Operating system files
 .DS_Store
 Thumbs.db
+
