@@ -109,65 +109,83 @@ def run_compare_cpsat(args):
 
 
 def main():
-    print("=== N-Queens SAT Solver ===")
-
-    while True:
-        try:
-            n = int(input("Enter board size N: "))
-
-            if n < 1:
-                print("Please enter a positive integer.")
-                continue
-
-            break
-        except ValueError:
-            print("Invalid input. Please enter an integer.")
-
-    print("\nChoose SAT encoding:")
-    print("1. Pairwise")
-    print("2. Sequential counter")
-
-    while True:
-        encoding_choice = input("Your choice (1/2, default 2): ").strip()
-
-        if encoding_choice in ("", "2"):
-            encoding = "sequential"
-            break
-        elif encoding_choice == "1":
-            encoding = "pairwise"
-            break
-        else:
-            print("Invalid choice. Enter 1 or 2.")
-
-    result = solve_nqueens(
-        n=n,
-        encoding=encoding,
-        solver_name="glucose3",
+    parser = argparse.ArgumentParser(
+        description="N-Queens SAT solver"
+    )
+    subparsers = parser.add_subparsers(
+        dest="command",
+        required=True,
     )
 
-    print("\n=== Results ===")
-    print(f"Board size: {n} x {n}")
-    print(f"Encoding: {encoding}")
-    print(f"SAT solver: {result['solver']}")
-    print(f"Satisfiable: {result['satisfiable']}")
-    print(f"Number of clauses: {result['clauses']}")
-    print(f"Encoding time: {result['build_time_seconds']:.6f} seconds")
-    print(f"Solving time: {result['solve_time_seconds']:.6f} seconds")
+    # Solve one instance.
+    solve_parser = subparsers.add_parser(
+        "solve",
+        help="solve one N-Queens instance with SAT",
+    )
+    solve_parser.add_argument("--n", type=int, required=True)
+    solve_parser.add_argument(
+        "--encoding",
+        choices=["pairwise", "sequential"],
+        default="sequential",
+    )
+    solve_parser.add_argument(
+        "--solver",
+        choices=SUPPORTED_SOLVERS,
+        default="glucose3",
+    )
+    solve_parser.add_argument(
+        "--show-board",
+        action="store_true",
+    )
+    solve_parser.set_defaults(func=run_solve)
 
-    if result["satisfiable"]:
-        positions = result["positions"]
+    # Benchmark a range of board sizes.
+    benchmark_parser = subparsers.add_parser(
+        "benchmark",
+        help="benchmark multiple board sizes",
+    )
+    benchmark_parser.add_argument("--min-n", type=int, default=4)
+    benchmark_parser.add_argument("--max-n", type=int, default=30)
+    benchmark_parser.add_argument(
+        "--encoding",
+        choices=["pairwise", "sequential"],
+        default="sequential",
+    )
+    benchmark_parser.add_argument(
+        "--solver",
+        choices=SUPPORTED_SOLVERS,
+        default="glucose3",
+    )
+    benchmark_parser.add_argument(
+        "--output",
+        default="results.csv",
+    )
+    benchmark_parser.set_defaults(func=run_benchmark)
 
-        print("\nQueen positions (row, column):")
-        print(positions)
+    # Optional CP-SAT comparison.
+    cpsat_parser = subparsers.add_parser(
+        "compare-cpsat",
+        help="solve using optional OR-Tools CP-SAT",
+    )
+    cpsat_parser.add_argument("--n", type=int, required=True)
+    cpsat_parser.add_argument(
+        "--show-board",
+        action="store_true",
+    )
+    cpsat_parser.set_defaults(func=run_compare_cpsat)
 
-        print("\nValid solution:", is_valid_solution(n, positions))
+    args = parser.parse_args()
 
-        show_board = input("\nDisplay board? (y/n): ").strip().lower()
+    if getattr(args, "n", 1) < 1:
+        parser.error("--n must be >= 1")
 
-        if show_board == "y":
-            print_board(n, positions)
-    else:
-        print("No solution exists for this board size.")
+    if getattr(args, "min_n", 1) < 1:
+        parser.error("--min-n must be >= 1")
+
+    if getattr(args, "max_n", 1) < getattr(args, "min_n", 1):
+        parser.error("--max-n must be >= --min-n")
+
+    args.func(args)
 
 
 if __name__ == "__main__":

@@ -17,7 +17,7 @@ env/
 htmlcov/
 
 # Generated benchmark results (optional)
-results.csv
+*.csv
 benchmark_results.csv
 
 # Operating system files
