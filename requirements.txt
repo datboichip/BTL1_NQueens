@@ -3,3 +3,4 @@ ortools
 gurobipy
 pandas
 matplotlib
+pyscipopt
