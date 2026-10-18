@@ -4,7 +4,7 @@ import argparse
 import csv
 import json
 
-from core.solver import solve_nqueens, SUPPORTED_SOLVERS
+from solvers.sat_solver import solve_nqueens, SUPPORTED_SOLVERS
 from misc.generateNQueensProblem import (
     print_board,
     is_valid_solution,
